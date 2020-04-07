@@ -107,6 +107,7 @@ LICENSE file.
 
   <!-- Properties Management -->
   <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.assembly.version>2.5.5</maven.assembly.version>
     <maven.dependency.version>2.10</maven.dependency.version>
 
@@ -138,7 +139,6 @@ LICENSE file.
     <mongodb.async.version>2.0.1</mongodb.async.version>
     <openjpa.jdbc.version>2.1.1</openjpa.jdbc.version>
     <orientdb.version>2.2.37</orientdb.version>
-    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <redis.version>2.9.0</redis.version>
     <riak.version>2.0.5</riak.version>
     <rocksdb.version>6.2.2</rocksdb.version>
@@ -146,6 +146,7 @@ LICENSE file.
     <solr.version>5.5.3</solr.version>
     <solr6.version>6.4.1</solr6.version>
     <solr7.version>7.7.2</solr7.version>
+    <stored.version>0.1.0</stored.version>
     <tarantool.version>1.6.5</tarantool.version>
     <thrift.version>0.8.0</thrift.version>
     <voldemort.version>0.81</voldemort.version>
@@ -168,8 +169,8 @@ LICENSE file.
     <module>cassandra</module>
     <module>cloudspanner</module>
     <module>couchbase</module>
-		<module>couchbase2</module>
-		<module>crail</module>
+    <module>couchbase2</module>
+    <module>crail</module>
     <module>dynamodb</module>
     <module>elasticsearch</module>
     <module>elasticsearch5</module>
@@ -198,9 +199,10 @@ LICENSE file.
     <module>riak</module>
     <module>rocksdb</module>
     <module>s3</module>
-    <module>solr</module>
     <module>solr6</module>
     <module>solr7</module>
+    <module>solr</module>
+    <module>stored</module>
     <module>tarantool</module>
     <module>tablestore</module>
     <!--<module>voldemort</module>-->
