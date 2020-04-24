@@ -32,13 +32,14 @@ java site.ycsb.CommandLine -db site.ycsb.db.StoredClient -p stored.url=http://12
 Before you can actually run the workload, you need to "load" the data first.
 
 ```
-bin/ycsb.sh load stored -s -P workloads/workloada
+bin/ycsb.sh load stored -s -P workloads/workloadc
 ```
 
-Then, you can run the workload:
+When loading the workload data it will print the required `stored.mapping_key`.
+Using that  you can run the workload:
 
 ```
-bin/ycsb.sh run stored -s -P workloads/workloada -p stored.mapping_key=/blob/7cc3e1de7953362c40352b7f6f283a040884f5af65cbd07519428ccfdc7e94e39255967fe94b3b23b90fe11f6d84d586d2bd76668287a33d8ab1bfee68fc11b0
+bin/ycsb.sh run stored -s -P workloads/workloadc -p stored.mapping_key=/blob/7cc3e1de7953362c40352b7f6f283a040884f5af65cbd07519428ccfdc7e94e39255967fe94b3b23b90fe11f6d84d586d2bd76668287a33d8ab1bfee68fc11b0
 ```
 
 ## Configuration Options
@@ -46,4 +47,4 @@ bin/ycsb.sh run stored -s -P workloads/workloada -p stored.mapping_key=/blob/7cc
 You can set the following properties (with the default settings applied):
 
  - stored.url=http://127.0.0.1:8080 => The URL for one server.
- - stored.mapping\_key => this is printed when loading a workload.
+ - stored.mapping\_key => this is printed when `load`ing a workload.

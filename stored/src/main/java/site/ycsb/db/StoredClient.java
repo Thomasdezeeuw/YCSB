@@ -103,11 +103,13 @@ public class StoredClient extends DB {
   @Override
   public void cleanup() throws DBException {
     try {
-      this.insert(null, MAPPING_KEY, StringByteIterator.getByteIteratorMap(this.keyMapping));
-      final String key = this.keyMapping.get(MAPPING_KEY);
-      System.out.println("=====================");
-      System.out.println("Set '" + MAPPING_KEY + "' to '" + key + "' for the run.");
-      System.out.println("=====================");
+      if (this.keyMapping != null) {
+        this.insert(null, MAPPING_KEY, StringByteIterator.getByteIteratorMap(this.keyMapping));
+        final String key = this.keyMapping.get(MAPPING_KEY);
+        System.out.println("=====================");
+        System.out.println("Next run use '-p " + MAPPING_KEY + "=" + key + "'.");
+        System.out.println("=====================");
+      }
 
       this.client.close();
       this.manager.shutdown();
