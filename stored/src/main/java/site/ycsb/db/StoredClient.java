@@ -2,6 +2,7 @@ package site.ycsb.db;
 
 import site.ycsb.ByteIterator;
 import site.ycsb.DB;
+import site.ycsb.Client;
 import site.ycsb.DBException;
 import site.ycsb.Status;
 import site.ycsb.StringByteIterator;
@@ -65,18 +66,22 @@ public class StoredClient extends DB {
 
     this.baseUrl = props.getProperty(URL_PROPERTY, "http://127.0.0.1:8080");
 
-    final String mappingKey = props.getProperty(MAPPING_KEY);
-    if (mappingKey == null) {
-      this.keyMapping = new HashMap();
+    if (this.isRun()) {
+      final String mappingKey = props.getProperty(MAPPING_KEY);
+      if (mappingKey == null) {
+        throw new DBException("missing property '" + MAPPING_KEY + "'");
+      } else {
+        try {
+          this.keyMapping = this.readBlob(this.baseUrl + mappingKey);
+        } catch(IOException e) {
+          throw new DBException(e);
+        }
+        if (this.keyMapping == null) {
+          throw new DBException("invalid '" + MAPPING_KEY + "' setting");
+        }
+      }
     } else {
-      try {
-        this.keyMapping = this.readBlob(this.baseUrl + mappingKey);
-      } catch(IOException e) {
-        throw new DBException(e);
-      }
-      if (this.keyMapping == null) {
-        throw new DBException("invalid '" + MAPPING_KEY + "' setting");
-      }
+      this.keyMapping = new HashMap();
     }
 
     // Test if the server is running.
@@ -100,10 +105,26 @@ public class StoredClient extends DB {
     }
   }
 
+  /**
+   * @return Returns true if its loading a workload.
+   */
+  private boolean isLoad() {
+    Properties props = getProperties();
+    return props.getProperty(Client.DO_TRANSACTIONS_PROPERTY) == String.valueOf(false);
+  }
+
+  /**
+   * @return Returns true if its running a workload.
+   */
+  private boolean isRun() {
+    Properties props = getProperties();
+    return props.getProperty(Client.DO_TRANSACTIONS_PROPERTY) == String.valueOf(true);
+  }
+
   @Override
   public void cleanup() throws DBException {
     try {
-      if (this.keyMapping != null) {
+      if (this.isLoad()) {
         this.insert(null, MAPPING_KEY, StringByteIterator.getByteIteratorMap(this.keyMapping));
         final String key = this.keyMapping.get(MAPPING_KEY);
         System.out.println("=====================");
