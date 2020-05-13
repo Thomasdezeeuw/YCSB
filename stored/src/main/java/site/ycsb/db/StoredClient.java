@@ -29,32 +29,47 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.Vector;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * A class that wraps a HTTP client to allow it to be interfaced with YCSB.
  *
  * This class extends {@link DB} and implements the database interface used by YCSB client.
  */
-public class StoredClient extends DB {
+public final class StoredClient extends DB {
   public static final String URL_PROPERTY = "stored.url";
   public static final String MAPPING_KEY = "stored.mapping_key";
 
   private PoolingHttpClientConnectionManager manager;
   private CloseableHttpClient client;
   private String baseUrl;
+
   // Maps key provided by the workload to it's path as returned by Stored in the
   // "Location" header of a response to a POST request.
-  private HashMap<String, String> keyMapping;
+  // This is `static` because it has to be shared between the different threads
+  // to ensure they have the same mappings.
+  private static ConcurrentHashMap<String, String> keyMapping = new ConcurrentHashMap();
+  // When modifying the mapping **on the stored** all threads must first wait on
+  // this group, than all try to hold the `mappingLock` after which they can
+  // operate using the mapping on the store.
+  private static AtomicReference<CountDownLatch> waitGroup = new AtomicReference(null);
+  private static ReentrantLock mappingLock = new ReentrantLock(false);
+  private static boolean loaded = false;
+  private static boolean stored = false;
 
   @Override
   public void init() throws DBException {
     Properties props = getProperties();
+    this.baseUrl = props.getProperty(URL_PROPERTY, "http://127.0.0.1:8080");
 
-    // TODO: check if pipelining is enabled.
+    this.initWaitGroup(null);
+
     this.manager = new PoolingHttpClientConnectionManager();
-    this.manager.setDefaultMaxPerRoute(2000); // TODO.
+    this.manager.setDefaultMaxPerRoute(100);
     this.manager.setMaxTotal(2000);
-    //this.manager.setDefaultSocketConfig(/* TODO. */);
 
     this.client = HttpClients.custom()
       .disableContentCompression() // Not supported.
@@ -64,24 +79,20 @@ public class StoredClient extends DB {
       .setUserAgent("YCSB/stored")
       .build();
 
-    this.baseUrl = props.getProperty(URL_PROPERTY, "http://127.0.0.1:8080");
-
     if (this.isRun()) {
       final String mappingKey = props.getProperty(MAPPING_KEY);
       if (mappingKey == null) {
         throw new DBException("missing property '" + MAPPING_KEY + "'");
       } else {
         try {
-          this.keyMapping = this.readBlob(this.baseUrl + mappingKey);
-        } catch(IOException e) {
+          this.loadKeyMapping(mappingKey);
+        } catch(IOException | InterruptedException e) {
           throw new DBException(e);
         }
         if (this.keyMapping == null) {
           throw new DBException("invalid '" + MAPPING_KEY + "' setting");
         }
       }
-    } else {
-      this.keyMapping = new HashMap();
     }
 
     // Test if the server is running.
@@ -121,20 +132,69 @@ public class StoredClient extends DB {
     return props.getProperty(Client.DO_TRANSACTIONS_PROPERTY) == String.valueOf(true);
   }
 
+  /**
+   * @return Returns the number of threads.
+   */
+  private int threads() {
+    Properties props = getProperties();
+    return Integer.parseInt(props.getProperty(Client.THREAD_COUNT_PROPERTY, "1"));
+  }
+
+  /**
+   * Initialises the waitGroup with the current number of threads.
+   */
+  private void initWaitGroup(final CountDownLatch expect) {
+    if (this.waitGroup.get() == expect) {
+      final int threads = threads();
+      this.waitGroup.compareAndSet(expect, new CountDownLatch(threads));
+    }
+  }
+
+  private void loadKeyMapping(final String mappingKey) throws IOException, InterruptedException {
+    // Wait for all others to read this point.
+    final CountDownLatch wg= this.waitGroup.get();
+    wg.countDown();
+    wg.await();
+    // All threads race for the lock.
+    this.mappingLock.lock();
+    if (!this.loaded) {
+      // The winner.
+      // Setup another round for storing the mapping.
+      this.initWaitGroup(wg);
+      // Load the mappings.
+      this.keyMapping = new ConcurrentHashMap(this.readBlob(this.baseUrl + mappingKey));
+      // Only do this once.
+      this.loaded = true;
+    }
+    this.mappingLock.unlock();
+  }
+
   @Override
   public void cleanup() throws DBException {
     try {
       if (this.isLoad()) {
-        this.insert(null, MAPPING_KEY, StringByteIterator.getByteIteratorMap(this.keyMapping));
-        final String key = this.keyMapping.get(MAPPING_KEY);
-        System.out.println("=====================");
-        System.out.println("Next run use '-p " + MAPPING_KEY + "=" + key + "'.");
-        System.out.println("=====================");
+        // Wait for all others to read this point.
+        final CountDownLatch wg = this.waitGroup.get();
+        wg.countDown();
+        wg.await();
+        // All threads race for the lock.
+        this.mappingLock.lock();
+        if (!this.stored) {
+          // The winner.
+          this.insert(null, MAPPING_KEY, StringByteIterator.getByteIteratorMap(this.keyMapping));
+          final String key = this.keyMapping.get(MAPPING_KEY);
+          System.out.println("=====================");
+          System.out.println("Next run use '-p " + MAPPING_KEY + "=" + key + "'.");
+          System.out.println("=====================");
+          // Only do this once.
+          this.stored = true;
+        }
+        this.mappingLock.unlock();
       }
 
       this.client.close();
       this.manager.shutdown();
-    } catch(IOException e) {
+    } catch(IOException | InterruptedException e) {
       throw new DBException(e);
     }
   }
