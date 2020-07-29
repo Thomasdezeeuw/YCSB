@@ -29,9 +29,9 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.Vector;
+import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -43,7 +43,7 @@ public final class StoredClient extends DB {
   public static final String URL_PROPERTY = "stored.url";
   public static final String MAPPING_KEY = "stored.mapping_key";
 
-  private PoolingHttpClientConnectionManager manager;
+  private PoolingHttpClientConnectionManager manager = new PoolingHttpClientConnectionManager();
   private CloseableHttpClient client;
   private String baseUrl;
 
@@ -52,24 +52,20 @@ public final class StoredClient extends DB {
   // This is `static` because it has to be shared between the different threads
   // to ensure they have the same mappings.
   private static ConcurrentHashMap<String, String> keyMapping = new ConcurrentHashMap();
-  // When modifying the mapping **on the stored** all threads must first wait on
-  // this group, than all try to hold the `mappingLock` after which they can
-  // operate using the mapping on the store.
-  private static AtomicReference<CountDownLatch> waitGroup = new AtomicReference(null);
-  private static ReentrantLock mappingLock = new ReentrantLock(false);
-  private static boolean loaded = false;
-  private static boolean stored = false;
+  // State of `keyMapping`, protects the following fields.
+  private static ReentrantLock mappingStateLock = new ReentrantLock(false);
+  // Whether or not the `keyMapping` is loaded, only used for `run`.
+  private static boolean mappingLoaded = false;
+  // Latch to wait for all threads to be done with storing the values, only used
+  // in `load`.
+  private static CyclicBarrier allDone;
+  // Whether or not the `keyMapping` is stored in a `load` action.
+  private static boolean mappingStored = false;
 
   @Override
   public void init() throws DBException {
     Properties props = getProperties();
     this.baseUrl = props.getProperty(URL_PROPERTY, "http://127.0.0.1:8080");
-
-    this.initWaitGroup(null);
-
-    this.manager = new PoolingHttpClientConnectionManager();
-    this.manager.setDefaultMaxPerRoute(100);
-    this.manager.setMaxTotal(2000);
 
     this.client = HttpClients.custom()
       .disableContentCompression() // Not supported.
@@ -93,6 +89,12 @@ public final class StoredClient extends DB {
           throw new DBException("invalid '" + MAPPING_KEY + "' setting");
         }
       }
+    } else if (this.isLoad()) {
+      this.mappingStateLock.lock();
+      if (this.allDone == null) {
+        this.allDone = new CyclicBarrier(this.threads());
+      }
+      this.mappingStateLock.unlock();
     }
 
     // Test if the server is running.
@@ -120,7 +122,7 @@ public final class StoredClient extends DB {
    * @return Returns true if its loading a workload.
    */
   private boolean isLoad() {
-    Properties props = getProperties();
+    final Properties props = getProperties();
     return props.getProperty(Client.DO_TRANSACTIONS_PROPERTY) == String.valueOf(false);
   }
 
@@ -128,7 +130,7 @@ public final class StoredClient extends DB {
    * @return Returns true if its running a workload.
    */
   private boolean isRun() {
-    Properties props = getProperties();
+    final Properties props = getProperties();
     return props.getProperty(Client.DO_TRANSACTIONS_PROPERTY) == String.valueOf(true);
   }
 
@@ -136,37 +138,21 @@ public final class StoredClient extends DB {
    * @return Returns the number of threads.
    */
   private int threads() {
-    Properties props = getProperties();
+    final Properties props = getProperties();
     return Integer.parseInt(props.getProperty(Client.THREAD_COUNT_PROPERTY, "1"));
   }
 
-  /**
-   * Initialises the waitGroup with the current number of threads.
-   */
-  private void initWaitGroup(final CountDownLatch expect) {
-    if (this.waitGroup.get() == expect) {
-      final int threads = threads();
-      this.waitGroup.compareAndSet(expect, new CountDownLatch(threads));
-    }
-  }
-
   private void loadKeyMapping(final String mappingKey) throws IOException, InterruptedException {
-    // Wait for all others to read this point.
-    final CountDownLatch wg= this.waitGroup.get();
-    wg.countDown();
-    wg.await();
     // All threads race for the lock.
-    this.mappingLock.lock();
-    if (!this.loaded) {
-      // The winner.
-      // Setup another round for storing the mapping.
-      this.initWaitGroup(wg);
+    this.mappingStateLock.lock();
+    if (!this.mappingLoaded) {
       // Load the mappings.
-      this.keyMapping = new ConcurrentHashMap(this.readBlob(this.baseUrl + mappingKey));
+      final HashMap<String, String> mapping = this.readBlob(this.baseUrl + mappingKey);
+      this.keyMapping.putAll(mapping);
       // Only do this once.
-      this.loaded = true;
+      this.mappingLoaded = true;
     }
-    this.mappingLock.unlock();
+    this.mappingStateLock.unlock();
   }
 
   @Override
@@ -174,27 +160,24 @@ public final class StoredClient extends DB {
     try {
       if (this.isLoad()) {
         // Wait for all others to read this point.
-        final CountDownLatch wg = this.waitGroup.get();
-        wg.countDown();
-        wg.await();
-        // All threads race for the lock.
-        this.mappingLock.lock();
-        if (!this.stored) {
-          // The winner.
+        this.allDone.await();
+
+        this.mappingStateLock.lock();
+        if (!this.mappingStored) {
           this.insert(null, MAPPING_KEY, StringByteIterator.getByteIteratorMap(this.keyMapping));
           final String key = this.keyMapping.get(MAPPING_KEY);
           System.out.println("=====================");
           System.out.println("Next run use '-p " + MAPPING_KEY + "=" + key + "'.");
           System.out.println("=====================");
           // Only do this once.
-          this.stored = true;
+          this.mappingStored = true;
         }
-        this.mappingLock.unlock();
+        this.mappingStateLock.unlock();
       }
 
       this.client.close();
       this.manager.shutdown();
-    } catch(IOException | InterruptedException e) {
+    } catch(IOException | InterruptedException | BrokenBarrierException e) {
       throw new DBException(e);
     }
   }
@@ -273,7 +256,7 @@ public final class StoredClient extends DB {
 
   @Override
   public Status update(final String table, final String key, final Map<String, ByteIterator> values) {
-    // Stored doesn't support updating blobs, there immutable.
+    // Stored doesn't support updating blobs, they're immutable.
     return Status.NOT_IMPLEMENTED;
   }
 
