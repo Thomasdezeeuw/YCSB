@@ -4,9 +4,13 @@ YCSB for Stored.
 
 ## Quickstart
 
-### 1. Start Couchbase Server
+### 1. Start Stored Server
 
 Start the server.
+
+```
+stored /path/to/config.toml
+```
 
 ### 2. Set up YCSB
 

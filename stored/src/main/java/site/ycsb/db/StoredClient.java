@@ -17,7 +17,6 @@ import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ByteArrayEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
-import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.util.EntityUtils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -43,7 +42,6 @@ public final class StoredClient extends DB {
   public static final String URL_PROPERTY = "stored.url";
   public static final String MAPPING_KEY = "stored.mapping_key";
 
-  private PoolingHttpClientConnectionManager manager = new PoolingHttpClientConnectionManager();
   private CloseableHttpClient client;
   private String baseUrl;
 
@@ -71,7 +69,6 @@ public final class StoredClient extends DB {
       .disableContentCompression() // Not supported.
       .disableCookieManagement() // Not supported.
       .disableRedirectHandling() // Not used.
-      .setConnectionManager(this.manager)
       .setUserAgent("YCSB/stored")
       .build();
 
@@ -176,7 +173,6 @@ public final class StoredClient extends DB {
       }
 
       this.client.close();
-      this.manager.shutdown();
     } catch(IOException | InterruptedException | BrokenBarrierException e) {
       throw new DBException(e);
     }
