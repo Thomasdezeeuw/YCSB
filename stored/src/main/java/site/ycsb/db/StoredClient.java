@@ -62,7 +62,7 @@ public final class StoredClient extends DB {
 
   @Override
   public void init() throws DBException {
-    Properties props = getProperties();
+    Properties props = this.getProperties();
     this.baseUrl = props.getProperty(URL_PROPERTY, "http://127.0.0.1:8080");
 
     this.client = HttpClients.custom()
@@ -77,14 +77,7 @@ public final class StoredClient extends DB {
       if (mappingKey == null) {
         throw new DBException("missing property '" + MAPPING_KEY + "'");
       } else {
-        try {
-          this.loadKeyMapping(mappingKey);
-        } catch(IOException | InterruptedException e) {
-          throw new DBException(e);
-        }
-        if (this.keyMapping == null) {
-          throw new DBException("invalid '" + MAPPING_KEY + "' setting");
-        }
+        this.loadKeyMapping(mappingKey);
       }
     } else if (this.isLoad()) {
       this.mappingStateLock.lock();
@@ -96,15 +89,15 @@ public final class StoredClient extends DB {
 
     // Test if the server is running.
     try {
-      HttpGet testRequest = new HttpGet(this.baseUrl + "/health");
-      CloseableHttpResponse testResponse = this.client.execute(testRequest);
+      final HttpGet testRequest = new HttpGet(this.baseUrl + "/health");
+      final CloseableHttpResponse testResponse = this.client.execute(testRequest);
 
       try {
-        StatusLine status = testResponse.getStatusLine();
+        final StatusLine status = testResponse.getStatusLine();
         assert status.getStatusCode() == 200;
         assert status.getProtocolVersion() == new ProtocolVersion("HTTP", 1, 1);
 
-        HttpEntity entity = testResponse.getEntity();
+        final HttpEntity entity = testResponse.getEntity();
         assert entity.getContentLength() == 2;
         assert entity.getContent().toString() == "Ok";
       } finally {
@@ -139,17 +132,24 @@ public final class StoredClient extends DB {
     return Integer.parseInt(props.getProperty(Client.THREAD_COUNT_PROPERTY, "1"));
   }
 
-  private void loadKeyMapping(final String mappingKey) throws IOException, InterruptedException {
-    // All threads race for the lock.
-    this.mappingStateLock.lock();
-    if (!this.mappingLoaded) {
-      // Load the mappings.
-      final HashMap<String, String> mapping = this.readBlob(this.baseUrl + mappingKey);
-      this.keyMapping.putAll(mapping);
-      // Only do this once.
-      this.mappingLoaded = true;
+  private void loadKeyMapping(final String mappingKey) throws DBException {
+    try {
+      this.mappingStateLock.lock();
+      if (!this.mappingLoaded) {
+        // Load the mapping.
+        final HashMap<String, String> mapping = this.readBlob(this.baseUrl + mappingKey);
+        if (mapping == null) {
+          throw new DBException("invalid '" + MAPPING_KEY + "'");
+        }
+
+        this.keyMapping.putAll(mapping);
+        // Only do this once.
+        this.mappingLoaded = true;
+      }
+      this.mappingStateLock.unlock();
+    } catch(IOException e) {
+      throw new DBException(e);
     }
-    this.mappingStateLock.unlock();
   }
 
   @Override
@@ -161,7 +161,11 @@ public final class StoredClient extends DB {
 
         this.mappingStateLock.lock();
         if (!this.mappingStored) {
-          this.insert(null, MAPPING_KEY, StringByteIterator.getByteIteratorMap(this.keyMapping));
+          final Status status = this.insert(null, MAPPING_KEY, StringByteIterator.getByteIteratorMap(this.keyMapping));
+          if (status != Status.OK) {
+            throw new DBException("failed to insert mapping");
+          }
+
           final String key = this.keyMapping.get(MAPPING_KEY);
           System.out.println("=====================");
           System.out.println("Next run use '-p " + MAPPING_KEY + "=" + key + "'.");
