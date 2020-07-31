@@ -114,6 +114,7 @@ LICENSE file.
     <!-- datastore binding versions, lex sorted -->
     <accumulo.1.9.version>1.9.3</accumulo.1.9.version>
     <aerospike.version>3.1.2</aerospike.version>
+    <ambry.version>0.1.0</ambry.version>
     <arangodb.version>4.4.1</arangodb.version>
     <asynchbase.version>1.8.2</asynchbase.version>
     <azurecosmos.version>2.2.3</azurecosmos.version>
@@ -162,6 +163,7 @@ LICENSE file.
     <!-- all the datastore bindings, lex sorted please -->
     <module>accumulo1.9</module>
     <module>aerospike</module>
+    <module>ambry</module>
     <module>arangodb</module>
     <module>asynchbase</module>
     <module>azurecosmos</module>
