@@ -62,6 +62,9 @@ public class CSVMeasurementsExporter implements MeasurementsExporter {
     for (final String metric : METRICS) {
       this.writeLine(metric);
     }
+    // Add an empty line at the end to indicate EOF, tools like R like too
+    // complain about it otherwise.
+    this.output.newLine();
     this.output.close();
   }
 
